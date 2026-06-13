@@ -2,7 +2,6 @@ import fs from 'fs';
 import path from 'path';
 
 const DATA_DIR = path.resolve('data');
-const CACHE_FILE = path.join(DATA_DIR, 'media-cache.json');
 const CONFIG_FILE = path.join(DATA_DIR, 'config.json');
 
 // 确保 data 目录存在
@@ -10,22 +9,6 @@ function ensureDataDir() {
   if (!fs.existsSync(DATA_DIR)) {
     fs.mkdirSync(DATA_DIR, { recursive: true });
   }
-}
-
-// 读取缓存
-function readCache() {
-  try {
-    if (fs.existsSync(CACHE_FILE)) {
-      return JSON.parse(fs.readFileSync(CACHE_FILE, 'utf-8'));
-    }
-  } catch { /* ignore */ }
-  return {};
-}
-
-// 写入缓存
-function writeCache(data) {
-  ensureDataDir();
-  fs.writeFileSync(CACHE_FILE, JSON.stringify(data, null, 2), 'utf-8');
 }
 
 // 读取配置
@@ -74,16 +57,16 @@ export default function localMediaPlugin() {
           return;
         }
 
-        // GET /api/config — 读取配置
-        if (req.url === '/api/config' && req.method === 'GET') {
+        // GET /api/tmdb/config — 读取配置
+        if (req.url === '/api/tmdb/config' && req.method === 'GET') {
           const config = readConfig();
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify(config));
           return;
         }
 
-        // PUT /api/config — 写入配置（body: { localPath, tmdbKey }）
-        if (req.url === '/api/config' && req.method === 'PUT') {
+        // PUT /api/tmdb/config — 写入配置（body: { localPath, tmdbKey }）
+        if (req.url === '/api/tmdb/config' && req.method === 'PUT') {
           try {
             const body = await readBody(req);
             const data = JSON.parse(body);
@@ -98,23 +81,6 @@ export default function localMediaPlugin() {
             res.writeHead(500, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ error: err.message }));
           }
-          return;
-        }
-
-        // GET /api/media — 返回已匹配的媒体列表（首页用）
-        if (req.url === '/api/media' && req.method === 'GET') {
-          const config = readConfig();
-          const cache = readCache();
-          const items = Object.entries(cache)
-            .filter(([, v]) => v.matched)
-            .map(([folderName, v]) => ({
-              ...v,
-              folderName,
-              folderPath: path.join(config.localPath || '', folderName),
-            }));
-          items.sort((a, b) => parseFloat(b.rating || 0) - parseFloat(a.rating || 0));
-          res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify(items));
           return;
         }
 
@@ -280,14 +246,14 @@ export default function localMediaPlugin() {
           return;
         }
 
-        // GET /api/folders?path=xxx
-        if (req.url.startsWith('/api/folders')) {
-          const url = new URL(req.url, 'http://localhost');
-          const dirPath = url.searchParams.get('path');
+        // GET /api/anime/folders — 返回文件夹名列表
+        if (req.url === '/api/anime/folders') {
+          const config = readConfig();
+          const dirPath = config.localPath;
 
           if (!dirPath) {
             res.writeHead(400, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ error: '缺少 path 参数' }));
+            res.end(JSON.stringify({ error: '未配置 localPath' }));
             return;
           }
 
@@ -300,18 +266,183 @@ export default function localMediaPlugin() {
             }
 
             const entries = fs.readdirSync(resolved, { withFileTypes: true });
-            const folders = entries
-              .filter((e) => e.isDirectory())
-              .map((e) => ({
-                name: e.name,
-                path: path.join(resolved, e.name),
-              }));
+            const folderNames = entries.filter((e) => e.isDirectory()).map((e) => e.name);
 
             res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify(folders));
+            res.end(JSON.stringify(folderNames));
           } catch (err) {
             res.writeHead(500, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ error: err.message }));
+          }
+          return;
+        }
+
+        // POST /api/anime/search — 查询单个影片信息（body: { name }）
+        if (req.url === '/api/anime/search' && req.method === 'POST') {
+          const body = await readBody(req);
+          const { name } = JSON.parse(body);
+          const config = readConfig();
+          const tmdbKey = config.tmdbKey;
+
+          if (!name) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: '缺少 name 参数' }));
+            return;
+          }
+
+          // 从文件夹名清理出可能的影片名称
+          function cleanFolderName(n) {
+            return n
+              .replace(/\.(2160p|1080p|720p|480p|4K|BluRay|WEB-DL|BDRip|HDRip|DVDRip|REMUX|HEVC|x264|x265|AAC|FLAC|DTS|Atmos).*$/i, '')
+              .replace(/[\.\[\]_]/g, ' ')
+              .replace(/\s+/g, ' ')
+              .trim();
+          }
+
+          const query = cleanFolderName(name);
+
+          let animeInfo = {
+            folderName: name,
+            tmdbId: null,
+            name: query,
+            originalName: '',
+            mediaType: 'movie',
+            overview: '暂无简介',
+            posterUrl: null,
+            backdropUrl: null,
+            voteAverage: null,
+            releaseDate: '',
+            status: 'not_found',
+            matched: false,
+          };
+
+          if (!tmdbKey) {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify(animeInfo));
+            return;
+          }
+
+          try {
+            const tmdbUrl = `https://api.themoviedb.org/3/search/multi?query=${encodeURIComponent(query)}&api_key=${tmdbKey}&language=zh-CN&page=1`;
+            const tmdbRes = await fetch(tmdbUrl);
+            const tmdbData = await tmdbRes.json();
+
+            let results = (tmdbData.results || []).filter(
+              (r) => !r.adult && (r.media_type === 'movie' || r.media_type === 'tv')
+            );
+
+            // 排序：标题精确匹配优先，再按人气+评分加权
+            const queryLower = query.toLowerCase();
+            results.sort((a, b) => {
+              const aTitle = (a.title || a.name || '').toLowerCase();
+              const bTitle = (b.title || b.name || '').toLowerCase();
+              const aExact = aTitle === queryLower ? 0 : 1;
+              const bExact = bTitle === queryLower ? 0 : 1;
+              if (aExact !== bExact) return aExact - bExact;
+              return (b.popularity || 0) + (b.vote_average || 0) * 2
+                   - (a.popularity || 0) - (a.vote_average || 0) * 2;
+            });
+
+            if (results.length > 0) {
+              const top = results[0];
+              animeInfo = {
+                folderName: name,
+                tmdbId: top.id,
+                name: top.title || top.name || query,
+                originalName: top.original_title || top.original_name || '',
+                mediaType: top.media_type,
+                overview: top.overview || '暂无简介',
+                posterUrl: top.poster_path ? `https://image.tmdb.org/t/p/w500${top.poster_path}` : null,
+                backdropUrl: top.backdrop_path ? `https://image.tmdb.org/t/p/w780${top.backdrop_path}` : null,
+                voteAverage: top.vote_average || null,
+                releaseDate: top.release_date || top.first_air_date || '',
+                status: 'found',
+                matched: true,
+              };
+            }
+
+            console.log(`[Search] "${name}" → ${animeInfo.name} (${(animeInfo.releaseDate || '').slice(0, 4)}) ${animeInfo.status}`);
+          } catch {
+            // TMDB 查询失败，返回默认值
+          }
+
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(animeInfo));
+          return;
+        }
+
+        // POST /api/anime/research — 返回多个候选结果（body: { name }）
+        if (req.url === '/api/anime/research' && req.method === 'POST') {
+          const body = await readBody(req);
+          const { name } = JSON.parse(body);
+          const config = readConfig();
+          const tmdbKey = config.tmdbKey;
+
+          if (!name) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: '缺少 name 参数' }));
+            return;
+          }
+
+          function cleanFolderName2(n) {
+            return n
+              .replace(/\.(2160p|1080p|720p|480p|4K|BluRay|WEB-DL|BDRip|HDRip|DVDRip|REMUX|HEVC|x264|x265|AAC|FLAC|DTS|Atmos).*$/i, '')
+              .replace(/[\.\[\]_]/g, ' ')
+              .replace(/\s+/g, ' ')
+              .trim();
+          }
+
+          const query = cleanFolderName2(name);
+
+          if (!tmdbKey) {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify([]));
+            return;
+          }
+
+          try {
+            const tmdbUrl = `https://api.themoviedb.org/3/search/multi?query=${encodeURIComponent(query)}&api_key=${tmdbKey}&language=zh-CN&page=1`;
+            const tmdbRes = await fetch(tmdbUrl);
+            const tmdbData = await tmdbRes.json();
+
+            let results = (tmdbData.results || []).filter(
+              (r) => !r.adult && (r.media_type === 'movie' || r.media_type === 'tv')
+            );
+
+            // 排序：标题精确匹配优先，再按人气+评分加权
+            const queryLower = query.toLowerCase();
+            results.sort((a, b) => {
+              const aTitle = (a.title || a.name || '').toLowerCase();
+              const bTitle = (b.title || b.name || '').toLowerCase();
+              const aExact = aTitle === queryLower ? 0 : 1;
+              const bExact = bTitle === queryLower ? 0 : 1;
+              if (aExact !== bExact) return aExact - bExact;
+              return (b.popularity || 0) + (b.vote_average || 0) * 2
+                   - (a.popularity || 0) - (a.vote_average || 0) * 2;
+            });
+
+            const list = results.map((top) => ({
+              folderName: name,
+              tmdbId: top.id,
+              name: top.title || top.name || query,
+              originalName: top.original_title || top.original_name || '',
+              mediaType: top.media_type,
+              overview: top.overview || '暂无简介',
+              posterUrl: top.poster_path ? `https://image.tmdb.org/t/p/w500${top.poster_path}` : null,
+              backdropUrl: top.backdrop_path ? `https://image.tmdb.org/t/p/w780${top.backdrop_path}` : null,
+              voteAverage: top.vote_average || null,
+              releaseDate: top.release_date || top.first_air_date || '',
+              status: 'found',
+              matched: true,
+            }));
+
+            console.log(`[Research] "${name}" → ${list.length} 条结果`);
+
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify(list));
+          } catch {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify([]));
           }
           return;
         }
@@ -439,58 +570,6 @@ export default function localMediaPlugin() {
             res.writeHead(500, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ error: err.message }));
           });
-          return;
-        }
-
-        // GET /api/cache — 读取全部缓存
-        if (req.url === '/api/cache' && req.method === 'GET') {
-          const cache = readCache();
-          res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify(cache));
-          return;
-        }
-
-        // POST /api/cache — 合并写入缓存（body: { key: value, ... }）
-        if (req.url === '/api/cache' && req.method === 'POST') {
-          try {
-            const body = await readBody(req);
-            const newData = JSON.parse(body);
-            const existing = readCache();
-            const merged = { ...existing, ...newData };
-            writeCache(merged);
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ ok: true, count: Object.keys(merged).length }));
-          } catch (err) {
-            res.writeHead(500, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ error: err.message }));
-          }
-          return;
-        }
-
-        // DELETE /api/cache?key=xxx — 删除单条缓存
-        if (req.url.startsWith('/api/cache') && req.method === 'DELETE') {
-          try {
-            const url = new URL(req.url, 'http://localhost');
-            const key = url.searchParams.get('key');
-            if (!key) {
-              res.writeHead(400, { 'Content-Type': 'application/json' });
-              res.end(JSON.stringify({ error: '缺少 key 参数' }));
-              return;
-            }
-            const existing = readCache();
-            if (!(key in existing)) {
-              res.writeHead(404, { 'Content-Type': 'application/json' });
-              res.end(JSON.stringify({ error: '缓存项不存在' }));
-              return;
-            }
-            delete existing[key];
-            writeCache(existing);
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ ok: true }));
-          } catch (err) {
-            res.writeHead(500, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ error: err.message }));
-          }
           return;
         }
 

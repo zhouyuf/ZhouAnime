@@ -8,7 +8,7 @@ import SettingsModal from './components/SettingsModal';
 import Footer from './components/Footer';
 import Admin from './pages/Admin';
 import Player from './pages/Player';
-import { get } from './utils/request';
+import { getCachedAnime } from './utils/localCache';
 import './App.css';
 
 function HomePage() {
@@ -17,10 +17,12 @@ function HomePage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    get('/api/media')
-      .then((data) => setMediaItems(data))
-      .catch(() => setMediaItems([]))
-      .finally(() => setLoading(false));
+    const cache = getCachedAnime();
+    const items = Object.entries(cache)
+      .filter(([, v]) => v.matched)
+      .map(([folderName, v]) => ({ ...v, folderName }));
+    setMediaItems(items);
+    setLoading(false);
   }, []);
 
   // 有 backdrop 的用于轮播横幅，取评分最高的前 5 个

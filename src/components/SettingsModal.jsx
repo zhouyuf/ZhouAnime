@@ -13,7 +13,7 @@ function SettingsModal({ open, onClose, onSave }) {
 
   useEffect(() => {
     if (open) {
-      get('/api/config')
+      get('/api/tmdb/config')
         .then((config) => {
           setLocalPath(config.localPath || '');
           setTmdbKey(config.tmdbKey || '');
@@ -27,7 +27,7 @@ function SettingsModal({ open, onClose, onSave }) {
 
   const handleSave = async () => {
     try {
-      await put('/api/config', { localPath: localPath.trim(), tmdbKey: tmdbKey.trim() });
+      await put('/api/tmdb/config', { localPath: localPath.trim(), tmdbKey: tmdbKey.trim() });
       message.success('设置已保存');
       onSave?.();
       onClose();
@@ -43,7 +43,9 @@ function SettingsModal({ open, onClose, onSave }) {
     }
     setTesting(true);
     try {
-      const folders = await get(`/api/folders?path=${encodeURIComponent(localPath.trim())}`);
+      // 先保存配置，再测试路径
+      await put('/api/tmdb/config', { localPath: localPath.trim(), tmdbKey: tmdbKey.trim() });
+      const folders = await get(`/api/anime/folders`);
       message.success(`路径有效，发现 ${folders.length} 个文件夹`);
     } catch (e) {
       message.error(e.message || '路径无效');

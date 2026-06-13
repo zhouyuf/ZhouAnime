@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
 import { Typography, Empty, Alert, Button, Progress, Table, Tag, Space, Popconfirm, message, Tooltip, Image, Modal, Radio, Spin } from 'antd';
 import { FolderOpenOutlined, ReloadOutlined, StopOutlined, SettingOutlined, SyncOutlined, DeleteOutlined, CheckCircleOutlined, CloseCircleOutlined } from '@ant-design/icons';
-import { get, post, del } from '../utils/request';
+import { get, post } from '../utils/request';
+import { getCachedFolders, setCachedFolders, getCachedAnime, setCachedAnime, removeCachedAnime } from '../utils/localCache';
 import './LocalMedia.css';
 
 const { Text } = Typography;
@@ -91,12 +92,10 @@ function LocalMedia({ onOpenSettings, configSaved, embedded = false }) {
 
   // 打开重新匹配弹窗
   const handleReimport = async (folderName) => {
-    if (!tmdbKey) return;
-    const query = cleanFolderName(folderName);
     setRematchModal({ open: true, folderName, results: [], loading: true, selected: null });
     try {
-      const tmdbData = await get(`/api/tmdb?query=${encodeURIComponent(query)}&apiKey=${tmdbKey}`);
-      setRematchModal((prev) => ({ ...prev, results: tmdbData.results || [], loading: false }));
+      const data = await post(`/api/anime/research`, { name: folderName });
+      setRematchModal((prev) => ({ ...prev, results: Array.isArray(data) ? data : [], loading: false }));
     } catch {
       message.error('搜索失败');
       setRematchModal((prev) => ({ ...prev, loading: false }));
@@ -104,37 +103,42 @@ function LocalMedia({ onOpenSettings, configSaved, embedded = false }) {
   };
 
   // 确认选择的匹配结果
-  const handleRematchConfirm = async () => {
+  const handleRematchConfirm = () => {
     const { folderName, results, selected } = rematchModal;
     if (selected === null) return;
 
     const item = results[selected];
-    const result = buildMediaResult(item, folderName);
+    const result = {
+      id: item.tmdbId || folderName,
+      title: item.name || cleanFolderName(folderName),
+      originalTitle: item.originalName || '',
+      year: (item.releaseDate || '').slice(0, 4),
+      rating: item.voteAverage ? item.voteAverage.toFixed(1) : 'N/A',
+      genre: item.mediaType === 'tv' ? '电视剧' : '电影',
+      description: item.overview || '暂无简介',
+      poster: item.posterUrl || null,
+      backdrop: item.backdropUrl || null,
+      mediaType: item.mediaType || 'movie',
+      matched: true,
+    };
 
-    try {
-      await post('/api/cache', { [folderName]: result });
+    // 保存到 localStorage
+    setCachedAnime({ [folderName]: result });
 
-      setMediaItems((prev) =>
-        prev.map((m) =>
-          m.folderName === folderName ? { ...result, folderName, folderPath: m.folderPath } : m
-        )
-      );
-      message.success(`"${folderName}" 已匹配为 "${result.title}"`);
-      setRematchModal({ open: false, folderName: '', results: [], loading: false, selected: null });
-    } catch {
-      message.error('保存失败');
-    }
+    setMediaItems((prev) =>
+      prev.map((m) =>
+        m.folderName === folderName ? { ...result, folderName, folderPath: m.folderPath } : m
+      )
+    );
+    message.success(`"${folderName}" 已匹配为 "${result.title}"`);
+    setRematchModal({ open: false, folderName: '', results: [], loading: false, selected: null });
   };
 
   // 单条删除
-  const handleDelete = async (folderName) => {
-    try {
-      await del(`/api/cache?key=${encodeURIComponent(folderName)}`);
-      setMediaItems((prev) => prev.filter((item) => item.folderName !== folderName));
-      message.success(`"${folderName}" 已从缓存中删除`);
-    } catch {
-      message.error('删除失败');
-    }
+  const handleDelete = (folderName) => {
+    removeCachedAnime(folderName);
+    setMediaItems((prev) => prev.filter((item) => item.folderName !== folderName));
+    message.success(`"${folderName}" 已从缓存中删除`);
   };
 
   // 停止导入
@@ -142,8 +146,8 @@ function LocalMedia({ onOpenSettings, configSaved, embedded = false }) {
     stopRef.current = true;
   };
 
-  // 加载数据
-  const fetchMedia = async () => {
+  // 加载数据（两阶段：先获取文件夹列表，再逐个查询详情）
+  const fetchMedia = async (forceRefresh = false) => {
     if (!localPath || !tmdbKey) return;
 
     stopRef.current = false;
@@ -154,94 +158,120 @@ function LocalMedia({ onOpenSettings, configSaved, embedded = false }) {
     setProgress({ current: 0, total: 0, currentName: '' });
 
     try {
-      // 1. 读取文件夹列表
-      const folderData = await get(`/api/folders?path=${encodeURIComponent(localPath)}`);
-
-      if (folderData.length === 0) {
-        setLoading(false);
-        return;
+      // 1. 从 localStorage 加载缓存（强制刷新时跳过）
+      if (forceRefresh) {
+        localStorage.removeItem('anime_folders');
+        localStorage.removeItem('anime_cache');
       }
+      const cache = getCachedAnime();
 
-      // 2. 加载缓存
-      let cache = {};
-      try {
-        cache = await get('/api/cache');
-      } catch { /* ignore */ }
-
-      // 3. 区分已缓存和未缓存的文件夹
-      const cached = [];
-      const uncached = [];
-      for (const folder of folderData) {
-        if (cache[folder.name]) {
-          cached.push({ ...cache[folder.name], folderName: folder.name, folderPath: folder.path });
-        } else {
-          uncached.push(folder);
+      // 2. 获取文件夹列表（优先用缓存）
+      let folderNames = getCachedFolders();
+      if (!folderNames) {
+        folderNames = await get(`/api/anime/folders`);
+        if (folderNames && folderNames.length > 0) {
+          setCachedFolders(folderNames);
         }
       }
 
-      if (cached.length > 0) {
-        setMediaItems(cached);
-      }
-
-      if (uncached.length === 0) {
+      if (!folderNames || folderNames.length === 0) {
         setLoading(false);
         return;
       }
 
-      setProgress({ current: 0, total: uncached.length, currentName: '' });
+      // 3. 用文件夹名生成 Table 占位行
+      const items = folderNames.map((name) => {
+        if (cache[name]) {
+          return { ...cache[name], folderName: name, searching: false };
+        }
+        return {
+          id: name,
+          title: cleanFolderName(name),
+          originalTitle: '',
+          year: '',
+          rating: 'N/A',
+          genre: '',
+          description: '',
+          poster: null,
+          backdrop: null,
+          mediaType: 'movie',
+          matched: false,
+          folderName: name,
+          searching: true,
+        };
+      });
 
-      // 4. 逐条查询 TMDB，每完成一条立即更新表格
+      setMediaItems([...items]);
+      setProgress({ current: 0, total: folderNames.length, currentName: '' });
+
+      // 4. 找出需要查询的未缓存文件夹
+      const uncachedNames = folderNames.filter((name) => !cache[name]);
+
+      if (uncachedNames.length === 0) {
+        setLogs((prev) => [...prev, `✅ 全部从缓存加载，共 ${folderNames.length} 个文件夹`]);
+        setLoading(false);
+        return;
+      }
+
+      // 5. 逐个查询详情，每完成一个立即更新对应行
       const newCacheEntries = {};
-      const allItems = [...cached];
 
-      for (let i = 0; i < uncached.length; i++) {
+      for (let i = 0; i < uncachedNames.length; i++) {
         if (stopRef.current) {
           setLogs((prev) => [...prev, `⏹️ 用户手动停止导入`]);
           break;
         }
 
-        const folder = uncached[i];
-        const query = cleanFolderName(folder.name);
+        const name = uncachedNames[i];
+        setProgress((prev) => ({ ...prev, current: i, currentName: name }));
 
-        setProgress((prev) => ({ ...prev, current: i, currentName: query }));
-
-        let item;
         try {
-          const tmdbData = await get(`/api/tmdb?query=${encodeURIComponent(query)}&apiKey=${tmdbKey}`);
+          const data = await post(`/api/anime/search`, { name });
 
-          const resultCount = tmdbData.results?.length || 0;
-          if (resultCount > 0) {
-            const top = tmdbData.results[0];
-            const title = top.title || top.name || query;
-            const year = (top.release_date || top.first_air_date || '').slice(0, 4);
-            const rating = top.vote_average ? top.vote_average.toFixed(1) : 'N/A';
-            setLogs((prev) => [...prev, `✅ [${i + 1}] "${query}" → ${title} (${year}) ⭐${rating}  共${resultCount}条结果`]);
+          const result = {
+            id: data.tmdbId || name,
+            title: data.name || cleanFolderName(name),
+            originalTitle: data.originalName || '',
+            year: (data.releaseDate || '').slice(0, 4),
+            rating: data.voteAverage ? data.voteAverage.toFixed(1) : 'N/A',
+            genre: data.mediaType === 'tv' ? '电视剧' : '电影',
+            description: data.overview || '暂无简介',
+            poster: data.posterUrl || null,
+            backdrop: data.backdropUrl || null,
+            mediaType: data.mediaType || 'movie',
+            matched: !!data.matched,
+            folderName: name,
+            searching: false,
+          };
+
+          newCacheEntries[name] = result;
+
+          // 日志
+          if (result.matched) {
+            setLogs((prev) => [...prev, `✅ [${i + 1}/${uncachedNames.length}] "${name}" → ${result.title} (${result.year}) ⭐${result.rating}`]);
           } else {
-            setLogs((prev) => [...prev, `❌ [${i + 1}] "${query}" → 未找到匹配结果`]);
+            setLogs((prev) => [...prev, `❌ [${i + 1}/${uncachedNames.length}] "${name}" → 未找到匹配结果`]);
           }
 
-          const result = resultCount > 0
-            ? buildMediaResult(tmdbData.results[0], folder.name)
-            : buildFallbackResult(folder.name);
-
-          newCacheEntries[folder.name] = result;
-          item = { ...result, folderName: folder.name, folderPath: folder.path };
+          // 更新对应行
+          setMediaItems((prev) =>
+            prev.map((item) => (item.folderName === name ? result : item))
+          );
         } catch {
-          setLogs((prev) => [...prev, `⚠️ [${i + 1}] "${query}" → 请求失败`]);
-          const fallback = buildFallbackResult(folder.name);
-          item = { ...fallback, folderName: folder.name, folderPath: folder.path };
+          setLogs((prev) => [...prev, `⚠️ [${i + 1}/${uncachedNames.length}] "${name}" → 请求失败`]);
+          setMediaItems((prev) =>
+            prev.map((item) =>
+              item.folderName === name ? { ...item, searching: false } : item
+            )
+          );
         }
 
-        allItems.push(item);
-        setMediaItems([...allItems]);
         setProgress((prev) => ({ ...prev, current: i + 1 }));
       }
 
-      // 5. 写入缓存
+      // 6. 写入 localStorage 缓存
       if (Object.keys(newCacheEntries).length > 0) {
-        try {
-          await post('/api/cache', newCacheEntries);
-        } catch { /* ignore */ }
+        setCachedAnime(newCacheEntries);
       }
     } catch (err) {
       setError(err.message);
@@ -253,7 +283,7 @@ function LocalMedia({ onOpenSettings, configSaved, embedded = false }) {
   // 加载配置
   const loadConfig = async () => {
     try {
-      const data = await get('/api/config');
+      const data = await get('/api/tmdb/config');
       setConfig(data);
     } catch { /* ignore */ }
   };
@@ -441,7 +471,7 @@ function LocalMedia({ onOpenSettings, configSaved, embedded = false }) {
           <Button
             type="text"
             icon={<ReloadOutlined />}
-            onClick={fetchMedia}
+            onClick={() => fetchMedia(true)}
             loading={loading}
             style={{ color: '#f5c518' }}
           >
@@ -466,7 +496,7 @@ function LocalMedia({ onOpenSettings, configSaved, embedded = false }) {
           <Button
             type="text"
             icon={<ReloadOutlined />}
-            onClick={fetchMedia}
+            onClick={() => fetchMedia(true)}
             loading={loading}
             style={{ color: '#f5c518' }}
           >
@@ -566,18 +596,16 @@ function LocalMedia({ onOpenSettings, configSaved, embedded = false }) {
           >
             <div className="rematch-list">
               {rematchModal.results.map((item, idx) => {
-                const title = item.title || item.name || '';
-                const originalTitle = item.original_title || item.original_name || '';
-                const year = (item.release_date || item.first_air_date || '').slice(0, 4);
-                const rating = item.vote_average ? item.vote_average.toFixed(1) : 'N/A';
-                const typeLabel = item.media_type === 'tv' ? '电视剧' : '电影';
-                const poster = item.poster_path
-                  ? `https://image.tmdb.org/t/p/w200${item.poster_path}`
-                  : null;
+                const title = item.name || '';
+                const originalName = item.originalName || '';
+                const year = (item.releaseDate || '').slice(0, 4);
+                const rating = item.voteAverage ? item.voteAverage.toFixed(1) : 'N/A';
+                const typeLabel = item.mediaType === 'tv' ? '电视剧' : '电影';
+                const poster = item.posterUrl || null;
 
                 return (
                   <div
-                    key={item.id}
+                    key={item.tmdbId || idx}
                     className={`rematch-item ${rematchModal.selected === idx ? 'rematch-item-selected' : ''}`}
                     onClick={() => setRematchModal((prev) => ({ ...prev, selected: idx }))}
                   >
@@ -597,12 +625,12 @@ function LocalMedia({ onOpenSettings, configSaved, embedded = false }) {
                     <div className="rematch-info">
                       <div className="rematch-title">
                         <Text strong style={{ color: '#e0e0e0' }}>{title}</Text>
-                        {originalTitle && originalTitle !== title && (
-                          <Text style={{ color: '#666', fontSize: 12, marginLeft: 8 }}>{originalTitle}</Text>
+                        {originalName && originalName !== title && (
+                          <Text style={{ color: '#666', fontSize: 12, marginLeft: 8 }}>{originalName}</Text>
                         )}
                       </div>
                       <div className="rematch-meta">
-                        <Tag color={item.media_type === 'tv' ? 'blue' : 'green'}>{typeLabel}</Tag>
+                        <Tag color={item.mediaType === 'tv' ? 'blue' : 'green'}>{typeLabel}</Tag>
                         {year && <Text style={{ color: '#aaa', fontSize: 12 }}>{year}</Text>}
                         <Text style={{ color: '#f5c518', fontSize: 12, fontWeight: 600 }}>⭐ {rating}</Text>
                       </div>

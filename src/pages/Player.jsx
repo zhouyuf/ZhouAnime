@@ -9,6 +9,7 @@ import Header from '../components/Header';
 import Footer from '../components/Footer';
 import SettingsModal from '../components/SettingsModal';
 import { get } from '../utils/request';
+import { getCachedAnimeItem } from '../utils/localCache';
 import { API_BASE } from '../config';
 import './Player.css';
 
@@ -41,14 +42,12 @@ function Player() {
   useEffect(() => {
     const init = async () => {
       try {
-        const config = await get('/api/config');
+        const config = await get('/api/tmdb/config');
         setTmdbKey(config.tmdbKey || '');
       } catch { /* ignore */ }
-      try {
-        const mediaList = await get('/api/media');
-        const item = mediaList.find((m) => m.folderName === folderName);
-        if (item) setMediaItem(item);
-      } catch { /* ignore */ }
+      // 从 localStorage 获取媒体信息
+      const item = getCachedAnimeItem(folderName);
+      if (item) setMediaItem({ ...item, folderName });
     };
     init();
   }, [folderName]);

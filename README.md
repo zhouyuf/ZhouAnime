@@ -82,17 +82,18 @@ ZhouAnime/
 
 ## 自定义 Vite 插件
 
-`vite-plugin-local-media.js` 实现了 5 个 REST API 端点作为 Vite 开发服务器中间件：
+`vite-plugin-local-media.js` 实现了以下 REST API 端点作为 Vite 开发服务器中间件：
 
 | 方法 | 端点 | 功能 |
 |------|------|------|
-| GET | `/api/config` | 读取配置（路径 + API Key） |
-| PUT | `/api/config` | 写入配置 |
-| GET | `/api/folders?path=xxx` | 列出指定路径的子目录 |
-| GET | `/api/tmdb?query=xxx&apiKey=xxx` | 代理 TMDB 搜索 API（中文搜索） |
-| GET | `/api/cache` | 读取完整媒体缓存 |
-| POST | `/api/cache` | 合并新条目到缓存 |
-| DELETE | `/api/cache?key=xxx` | 删除单条缓存记录 |
+| GET | `/api/tmdb/config` | 读取配置（路径 + API Key） |
+| PUT | `/api/tmdb/config` | 写入配置 |
+| GET | `/api/anime/folders` | 列出本地路径的子目录名列表 |
+| POST | `/api/anime/search` | 查询单个影片信息（body: `{ name }`） |
+| POST | `/api/anime/research` | 返回多个候选匹配结果（body: `{ name }`） |
+| GET | `/api/tmdb/search?query=xxx&apiKey=xxx` | 代理 TMDB 搜索 API（中文搜索） |
+
+> 影片缓存已改为 localStorage 存储，无需后端接口。
 
 ## 路由
 
