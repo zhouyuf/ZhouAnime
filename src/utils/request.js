@@ -26,7 +26,9 @@ export async function request(url, options = {}) {
  * GET 请求
  */
 export function get(url) {
-  return request(url);
+  return request(url, {
+    method: 'GET',
+  });
 }
 
 /**
