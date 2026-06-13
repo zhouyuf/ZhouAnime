@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Typography, Empty, Alert, Button, Progress, Table, Tag, Space, Popconfirm, message, Tooltip, Image, Modal, Radio, Spin } from 'antd';
 import { FolderOpenOutlined, ReloadOutlined, StopOutlined, SettingOutlined, SyncOutlined, DeleteOutlined, CheckCircleOutlined, CloseCircleOutlined } from '@ant-design/icons';
-import { API_BASE } from '../config';
+import { get, post, del } from '../utils/request';
 import './LocalMedia.css';
 
 const { Text } = Typography;
@@ -95,10 +95,7 @@ function LocalMedia({ onOpenSettings, configSaved, embedded = false }) {
     const query = cleanFolderName(folderName);
     setRematchModal({ open: true, folderName, results: [], loading: true, selected: null });
     try {
-      const tmdbRes = await fetch(
-        `${API_BASE}/api/tmdb?query=${encodeURIComponent(query)}&apiKey=${tmdbKey}`
-      );
-      const tmdbData = await tmdbRes.json();
+      const tmdbData = await get(`/api/tmdb?query=${encodeURIComponent(query)}&apiKey=${tmdbKey}`);
       setRematchModal((prev) => ({ ...prev, results: tmdbData.results || [], loading: false }));
     } catch {
       message.error('搜索失败');
@@ -115,11 +112,7 @@ function LocalMedia({ onOpenSettings, configSaved, embedded = false }) {
     const result = buildMediaResult(item, folderName);
 
     try {
-      await fetch(`${API_BASE}/api/cache`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ [folderName]: result }),
-      });
+      await post('/api/cache', { [folderName]: result });
 
       setMediaItems((prev) =>
         prev.map((m) =>
@@ -136,9 +129,7 @@ function LocalMedia({ onOpenSettings, configSaved, embedded = false }) {
   // 单条删除
   const handleDelete = async (folderName) => {
     try {
-      await fetch(`${API_BASE}/api/cache?key=${encodeURIComponent(folderName)}`, {
-        method: 'DELETE',
-      });
+      await del(`/api/cache?key=${encodeURIComponent(folderName)}`);
       setMediaItems((prev) => prev.filter((item) => item.folderName !== folderName));
       message.success(`"${folderName}" 已从缓存中删除`);
     } catch {
@@ -164,12 +155,7 @@ function LocalMedia({ onOpenSettings, configSaved, embedded = false }) {
 
     try {
       // 1. 读取文件夹列表
-      const folderRes = await fetch(`${API_BASE}/api/folders?path=${encodeURIComponent(localPath)}`);
-      if (!folderRes.ok) {
-        const err = await folderRes.json();
-        throw new Error(err.error || '读取路径失败');
-      }
-      const folderData = await folderRes.json();
+      const folderData = await get(`/api/folders?path=${encodeURIComponent(localPath)}`);
 
       if (folderData.length === 0) {
         setLoading(false);
@@ -179,8 +165,7 @@ function LocalMedia({ onOpenSettings, configSaved, embedded = false }) {
       // 2. 加载缓存
       let cache = {};
       try {
-        const cacheRes = await fetch(`${API_BASE}/api/cache`);
-        if (cacheRes.ok) cache = await cacheRes.json();
+        cache = await get('/api/cache');
       } catch { /* ignore */ }
 
       // 3. 区分已缓存和未缓存的文件夹
@@ -222,10 +207,7 @@ function LocalMedia({ onOpenSettings, configSaved, embedded = false }) {
 
         let item;
         try {
-          const tmdbRes = await fetch(
-            `${API_BASE}/api/tmdb?query=${encodeURIComponent(query)}&apiKey=${tmdbKey}`
-          );
-          const tmdbData = await tmdbRes.json();
+          const tmdbData = await get(`/api/tmdb?query=${encodeURIComponent(query)}&apiKey=${tmdbKey}`);
 
           const resultCount = tmdbData.results?.length || 0;
           if (resultCount > 0) {
@@ -258,11 +240,7 @@ function LocalMedia({ onOpenSettings, configSaved, embedded = false }) {
       // 5. 写入缓存
       if (Object.keys(newCacheEntries).length > 0) {
         try {
-          await fetch(`${API_BASE}/api/cache`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(newCacheEntries),
-          });
+          await post('/api/cache', newCacheEntries);
         } catch { /* ignore */ }
       }
     } catch (err) {
@@ -275,11 +253,8 @@ function LocalMedia({ onOpenSettings, configSaved, embedded = false }) {
   // 加载配置
   const loadConfig = async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/config`);
-      if (res.ok) {
-        const data = await res.json();
-        setConfig(data);
-      }
+      const data = await get('/api/config');
+      setConfig(data);
     } catch { /* ignore */ }
   };
 

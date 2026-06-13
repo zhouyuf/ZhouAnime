@@ -8,7 +8,7 @@ import SettingsModal from './components/SettingsModal';
 import Footer from './components/Footer';
 import Admin from './pages/Admin';
 import Player from './pages/Player';
-import { API_BASE } from './config';
+import { get } from './utils/request';
 import './App.css';
 
 function HomePage() {
@@ -17,8 +17,7 @@ function HomePage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch(`${API_BASE}/api/media`)
-      .then((res) => res.json())
+    get('/api/media')
       .then((data) => setMediaItems(data))
       .catch(() => setMediaItems([]))
       .finally(() => setLoading(false));

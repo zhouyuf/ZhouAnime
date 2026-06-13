@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Modal, Input, Button, Space, message, Typography, Alert } from 'antd';
 import { FolderOpenOutlined, KeyOutlined } from '@ant-design/icons';
-import { API_BASE } from '../config';
+import { get, put } from '../utils/request';
 import './SettingsModal.css';
 
 const { Text, Link } = Typography;
@@ -13,8 +13,7 @@ function SettingsModal({ open, onClose, onSave }) {
 
   useEffect(() => {
     if (open) {
-      fetch(`${API_BASE}/api/config`)
-        .then((res) => res.json())
+      get('/api/config')
         .then((config) => {
           setLocalPath(config.localPath || '');
           setTmdbKey(config.tmdbKey || '');
@@ -28,16 +27,12 @@ function SettingsModal({ open, onClose, onSave }) {
 
   const handleSave = async () => {
     try {
-      await fetch('/api/config', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ localPath: localPath.trim(), tmdbKey: tmdbKey.trim() }),
-      });
+      await put('/api/config', { localPath: localPath.trim(), tmdbKey: tmdbKey.trim() });
       message.success('设置已保存');
       onSave?.();
       onClose();
-    } catch {
-      message.error('保存失败');
+    } catch (e) {
+      message.error(e.message || '保存失败');
     }
   };
 
@@ -48,15 +43,10 @@ function SettingsModal({ open, onClose, onSave }) {
     }
     setTesting(true);
     try {
-      const res = await fetch(`${API_BASE}/api/folders?path=${encodeURIComponent(localPath.trim())}`);
-      const data = await res.json();
-      if (res.ok) {
-        message.success(`路径有效，发现 ${data.length} 个文件夹`);
-      } else {
-        message.error(data.error || '路径无效');
-      }
-    } catch {
-      message.error('无法连接服务器');
+      const folders = await get(`/api/folders?path=${encodeURIComponent(localPath.trim())}`);
+      message.success(`路径有效，发现 ${folders.length} 个文件夹`);
+    } catch (e) {
+      message.error(e.message || '路径无效');
     } finally {
       setTesting(false);
     }
