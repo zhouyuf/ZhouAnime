@@ -1,0 +1,57 @@
+.video-carousel {
+  padding: 24px 0;
+}
+
+.carousel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+  padding: 0 4px;
+}
+
+.carousel-title.ant-typography {
+  color: #fff;
+  margin: 0;
+  font-weight: 600;
+}
+
+.carousel-more {
+  color: #f5c518;
+  font-size: 14px;
+  text-decoration: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  transition: color 0.2s;
+}
+
+.carousel-more:hover {
+  color: #ffd700;
+}
+
+.carousel-track {
+  display: flex;
+  gap: 16px;
+  overflow-x: auto;
+  padding-bottom: 8px;
+  scroll-behavior: smooth;
+}
+
+.carousel-track::-webkit-scrollbar {
+  height: 6px;
+}
+
+.carousel-track::-webkit-scrollbar-track {
+  background: #111;
+  border-radius: 3px;
+}
+
+.carousel-track::-webkit-scrollbar-thumb {
+  background: #333;
+  border-radius: 3px;
+}
+
+.carousel-track::-webkit-scrollbar-thumb:hover {
+  background: #555;
+}

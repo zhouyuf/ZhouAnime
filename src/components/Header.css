@@ -1,0 +1,86 @@
+.site-header {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background: #0a0a0a !important;
+  border-bottom: 1px solid #1a1a1a;
+  padding: 0 24px;
+  height: 64px;
+  line-height: 64px;
+}
+
+.header-inner {
+  max-width: 1400px;
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  height: 100%;
+  gap: 24px;
+}
+
+.header-logo {
+  flex-shrink: 0;
+  font-size: 24px;
+  font-weight: 700;
+  cursor: pointer;
+  user-select: none;
+}
+
+.logo-text {
+  color: #fff;
+}
+
+.logo-highlight {
+  color: #f5c518;
+}
+
+.header-search {
+  max-width: 400px;
+}
+
+.header-search .ant-input-wrapper {
+  background: #1a1a1a;
+  border-radius: 8px;
+}
+
+.header-search .ant-input {
+  background: #1a1a1a;
+  color: #e0e0e0;
+  border: 1px solid #333;
+}
+
+.header-search .ant-input:focus {
+  border-color: #f5c518;
+}
+
+.header-search .ant-input-search-button {
+  background: #1a1a1a;
+  border-color: #333;
+}
+
+.header-nav {
+  flex: 1;
+  justify-content: flex-end;
+  background: transparent !important;
+  border-bottom: none !important;
+  min-width: 0;
+}
+
+.header-nav .ant-menu-item {
+  font-size: 14px;
+  color: #aaa !important;
+}
+
+.header-nav .ant-menu-item:hover {
+  color: #f5c518 !important;
+}
+
+.header-settings-btn {
+  flex-shrink: 0;
+  color: #888 !important;
+  font-size: 18px;
+}
+
+.header-settings-btn:hover {
+  color: #f5c518 !important;
+}

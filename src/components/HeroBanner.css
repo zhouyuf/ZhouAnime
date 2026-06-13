@@ -1,0 +1,80 @@
+.hero-banner {
+  margin-bottom: 16px;
+}
+
+.hero-slide {
+  position: relative;
+  height: 500px;
+  background-size: cover;
+  background-position: center top;
+  background-repeat: no-repeat;
+}
+
+.hero-gradient {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    to right,
+    rgba(0, 0, 0, 0.9) 0%,
+    rgba(0, 0, 0, 0.6) 40%,
+    rgba(0, 0, 0, 0.2) 70%,
+    transparent 100%
+  );
+}
+
+.hero-content {
+  position: relative;
+  z-index: 1;
+  max-width: 600px;
+  padding: 80px 48px;
+  color: #fff;
+}
+
+.hero-genre {
+  margin-bottom: 12px;
+  font-size: 13px;
+}
+
+.hero-title {
+  font-size: 42px;
+  font-weight: 700;
+  margin: 0 0 4px;
+  line-height: 1.2;
+}
+
+.hero-original-title {
+  font-size: 16px;
+  color: #aaa;
+  margin: 0 0 16px;
+}
+
+.hero-meta {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 16px;
+  font-size: 16px;
+}
+
+.hero-rating {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  color: #f5c518;
+}
+
+.hero-year {
+  color: #ccc;
+}
+
+.hero-desc {
+  font-size: 15px;
+  line-height: 1.6;
+  color: #bbb;
+  margin-bottom: 24px;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
