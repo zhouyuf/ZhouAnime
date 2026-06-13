@@ -8,6 +8,7 @@ import JASSUB from 'jassub';
 import Header from '../components/Header';
 import Footer from '../components/Footer';
 import SettingsModal from '../components/SettingsModal';
+import { API_BASE } from '../config';
 import './Player.css';
 
 const { Content } = Layout;
@@ -39,11 +40,11 @@ function Player() {
   useEffect(() => {
     const init = async () => {
       try {
-        const configRes = await fetch('/api/config');
+        const configRes = await fetch(`${API_BASE}/api/config`);
         const config = await configRes.json();
         setTmdbKey(config.tmdbKey || '');
 
-        const mediaRes = await fetch('/api/media');
+        const mediaRes = await fetch(`${API_BASE}/api/media`);
         const mediaList = await mediaRes.json();
         const item = mediaList.find((m) => m.folderName === folderName);
         if (item) setMediaItem(item);
@@ -59,8 +60,8 @@ function Player() {
     const type = mediaType || 'tv';
 
     Promise.all([
-      fetch(`/api/tmdb/detail?id=${id}&mediaType=${type}&apiKey=${tmdbKey}`).then((r) => r.json()),
-      fetch(`/api/tmdb/credits?id=${id}&mediaType=${type}&apiKey=${tmdbKey}`).then((r) => r.json()),
+      fetch(`${API_BASE}/api/tmdb/detail?id=${id}&mediaType=${type}&apiKey=${tmdbKey}`).then((r) => r.json()),
+      fetch(`${API_BASE}/api/tmdb/credits?id=${id}&mediaType=${type}&apiKey=${tmdbKey}`).then((r) => r.json()),
     ]).then(([detailData, creditsData]) => {
       setDetail(detailData);
       setCredits(creditsData);
@@ -75,7 +76,7 @@ function Player() {
   // 加载本地视频文件列表
   useEffect(() => {
     if (!mediaItem?.folderPath) return;
-    fetch(`/api/videos?path=${encodeURIComponent(mediaItem.folderPath)}`)
+    fetch(`${API_BASE}/api/videos?path=${encodeURIComponent(mediaItem.folderPath)}`)
       .then((r) => r.json())
       .then((files) => {
         setVideoFiles(files || []);
@@ -87,7 +88,7 @@ function Player() {
   // 加载 TMDB 集数信息（仅电视剧）
   useEffect(() => {
     if (!mediaItem || !tmdbKey || mediaItem.mediaType !== 'tv' || !detail) return;
-    fetch(`/api/tmdb/season?id=${mediaItem.id}&season=${activeSeason}&apiKey=${tmdbKey}`)
+    fetch(`${API_BASE}/api/tmdb/season?id=${mediaItem.id}&season=${activeSeason}&apiKey=${tmdbKey}`)
       .then((r) => r.json())
       .then((data) => {
         setEpisodes(data.episodes || []);

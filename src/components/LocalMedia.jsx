@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Typography, Empty, Alert, Button, Progress, Table, Tag, Space, Popconfirm, message, Tooltip, Image, Modal, Radio, Spin } from 'antd';
 import { FolderOpenOutlined, ReloadOutlined, StopOutlined, SettingOutlined, SyncOutlined, DeleteOutlined, CheckCircleOutlined, CloseCircleOutlined } from '@ant-design/icons';
+import { API_BASE } from '../config';
 import './LocalMedia.css';
 
 const { Text } = Typography;
@@ -95,7 +96,7 @@ function LocalMedia({ onOpenSettings, configSaved, embedded = false }) {
     setRematchModal({ open: true, folderName, results: [], loading: true, selected: null });
     try {
       const tmdbRes = await fetch(
-        `/api/tmdb?query=${encodeURIComponent(query)}&apiKey=${tmdbKey}`
+        `${API_BASE}/api/tmdb?query=${encodeURIComponent(query)}&apiKey=${tmdbKey}`
       );
       const tmdbData = await tmdbRes.json();
       setRematchModal((prev) => ({ ...prev, results: tmdbData.results || [], loading: false }));
@@ -114,7 +115,7 @@ function LocalMedia({ onOpenSettings, configSaved, embedded = false }) {
     const result = buildMediaResult(item, folderName);
 
     try {
-      await fetch('/api/cache', {
+      await fetch(`${API_BASE}/api/cache`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ [folderName]: result }),
@@ -135,7 +136,7 @@ function LocalMedia({ onOpenSettings, configSaved, embedded = false }) {
   // 单条删除
   const handleDelete = async (folderName) => {
     try {
-      await fetch(`/api/cache?key=${encodeURIComponent(folderName)}`, {
+      await fetch(`${API_BASE}/api/cache?key=${encodeURIComponent(folderName)}`, {
         method: 'DELETE',
       });
       setMediaItems((prev) => prev.filter((item) => item.folderName !== folderName));
@@ -163,7 +164,7 @@ function LocalMedia({ onOpenSettings, configSaved, embedded = false }) {
 
     try {
       // 1. 读取文件夹列表
-      const folderRes = await fetch(`/api/folders?path=${encodeURIComponent(localPath)}`);
+      const folderRes = await fetch(`${API_BASE}/api/folders?path=${encodeURIComponent(localPath)}`);
       if (!folderRes.ok) {
         const err = await folderRes.json();
         throw new Error(err.error || '读取路径失败');
@@ -178,7 +179,7 @@ function LocalMedia({ onOpenSettings, configSaved, embedded = false }) {
       // 2. 加载缓存
       let cache = {};
       try {
-        const cacheRes = await fetch('/api/cache');
+        const cacheRes = await fetch(`${API_BASE}/api/cache`);
         if (cacheRes.ok) cache = await cacheRes.json();
       } catch { /* ignore */ }
 
@@ -222,7 +223,7 @@ function LocalMedia({ onOpenSettings, configSaved, embedded = false }) {
         let item;
         try {
           const tmdbRes = await fetch(
-            `/api/tmdb?query=${encodeURIComponent(query)}&apiKey=${tmdbKey}`
+            `${API_BASE}/api/tmdb?query=${encodeURIComponent(query)}&apiKey=${tmdbKey}`
           );
           const tmdbData = await tmdbRes.json();
 
@@ -257,7 +258,7 @@ function LocalMedia({ onOpenSettings, configSaved, embedded = false }) {
       // 5. 写入缓存
       if (Object.keys(newCacheEntries).length > 0) {
         try {
-          await fetch('/api/cache', {
+          await fetch(`${API_BASE}/api/cache`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(newCacheEntries),
@@ -274,7 +275,7 @@ function LocalMedia({ onOpenSettings, configSaved, embedded = false }) {
   // 加载配置
   const loadConfig = async () => {
     try {
-      const res = await fetch('/api/config');
+      const res = await fetch(`${API_BASE}/api/config`);
       if (res.ok) {
         const data = await res.json();
         setConfig(data);

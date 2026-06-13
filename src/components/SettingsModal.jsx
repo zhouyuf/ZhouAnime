@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Modal, Input, Button, Space, message, Typography, Alert } from 'antd';
 import { FolderOpenOutlined, KeyOutlined } from '@ant-design/icons';
+import { API_BASE } from '../config';
 import './SettingsModal.css';
 
 const { Text, Link } = Typography;
@@ -12,7 +13,7 @@ function SettingsModal({ open, onClose, onSave }) {
 
   useEffect(() => {
     if (open) {
-      fetch('/api/config')
+      fetch(`${API_BASE}/api/config`)
         .then((res) => res.json())
         .then((config) => {
           setLocalPath(config.localPath || '');
@@ -47,7 +48,7 @@ function SettingsModal({ open, onClose, onSave }) {
     }
     setTesting(true);
     try {
-      const res = await fetch(`/api/folders?path=${encodeURIComponent(localPath.trim())}`);
+      const res = await fetch(`${API_BASE}/api/folders?path=${encodeURIComponent(localPath.trim())}`);
       const data = await res.json();
       if (res.ok) {
         message.success(`路径有效，发现 ${data.length} 个文件夹`);
