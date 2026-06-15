@@ -84,59 +84,38 @@ export default function localMediaPlugin() {
           return;
         }
 
-        // GET /api/videos?path=xxx — 列出目录下的视频文件（第一层）
-        if (req.url.startsWith('/api/videos')) {
-          const url = new URL(req.url, 'http://localhost');
-          const dirPath = url.searchParams.get('path');
+        // POST /api/anime/videos — 获取文件夹下的视频文件名列表（body: { name }）
+        if (req.url === '/api/anime/videos' && req.method === 'POST') {
+          const body = await readBody(req);
+          const { name } = JSON.parse(body);
+          const config = readConfig();
 
-          if (!dirPath) {
+          if (!name) {
             res.writeHead(400, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ error: '缺少 path 参数' }));
+            res.end(JSON.stringify({ error: '缺少 name 参数' }));
             return;
           }
+
+          const dirPath = path.join(config.localPath || '', name);
 
           try {
             const resolved = path.resolve(dirPath);
             if (!fs.existsSync(resolved)) {
-              res.writeHead(404, { 'Content-Type': 'application/json' });
-              res.end(JSON.stringify({ error: '路径不存在' }));
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify([]));
               return;
             }
 
             const VIDEO_EXTS = new Set(['.mkv', '.mp4', '.avi', '.wmv', '.flv', '.mov', '.rmvb', '.ts', '.m4v', '.webm']);
-            const SUB_EXTS = new Set(['.srt', '.ass', '.ssa', '.vtt', '.sub']);
             const entries = fs.readdirSync(resolved, { withFileTypes: true });
 
-            // 收集所有字幕文件，按基础名分组
-            const subMap = {};
-            entries.forEach((e) => {
-              if (e.isFile() && SUB_EXTS.has(path.extname(e.name).toLowerCase())) {
-                const baseName = e.name.replace(/\.[^.]+$/, '');
-                if (!subMap[baseName]) subMap[baseName] = [];
-                subMap[baseName].push({
-                  name: e.name,
-                  path: path.join(resolved, e.name),
-                  ext: path.extname(e.name).toLowerCase(),
-                });
-              }
-            });
-
-            const videos = entries
+            const files = entries
               .filter((e) => e.isFile() && VIDEO_EXTS.has(path.extname(e.name).toLowerCase()))
-              .map((e) => {
-                const baseName = e.name.replace(/\.[^.]+$/, '');
-                const subtitles = subMap[baseName] || [];
-                return {
-                  name: e.name,
-                  path: path.join(resolved, e.name),
-                  ext: path.extname(e.name).toLowerCase(),
-                  subtitles,
-                };
-              })
-              .sort((a, b) => a.name.localeCompare(b.name, 'zh-CN', { numeric: true }));
+              .map((e) => e.name)
+              .sort((a, b) => a.localeCompare(b, 'zh-CN', { numeric: true }));
 
             res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify(videos));
+            res.end(JSON.stringify(files));
           } catch (err) {
             res.writeHead(500, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ error: err.message }));
@@ -144,105 +123,102 @@ export default function localMediaPlugin() {
           return;
         }
 
-        // GET /api/subtitle/raw?path=xxx — 返回原始字幕文件（供 JASSUB 使用）
-        if (req.url.startsWith('/api/subtitle/raw')) {
-          const url = new URL(req.url, 'http://localhost');
-          const filePath = url.searchParams.get('path');
+        // GET /api/anime/stream/test — 直接代理后端视频流（测试用）
+        if (req.url.startsWith('/api/anime/stream/test')) {
+          const backendUrl = `http://localhost:8080${req.url}`;
+          const headers = {};
+          if (req.headers.range) headers.range = req.headers.range;
 
-          if (!filePath) {
-            res.writeHead(400, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ error: '缺少 path 参数' }));
-            return;
-          }
-
-          try {
-            const resolved = path.resolve(filePath);
-            if (!fs.existsSync(resolved)) {
-              res.writeHead(404, { 'Content-Type': 'application/json' });
-              res.end(JSON.stringify({ error: '文件不存在' }));
-              return;
-            }
-            console.log(`[SUB] ${path.basename(resolved)}`);
-            const content = fs.readFileSync(resolved, 'utf-8');
-            res.writeHead(200, {
-              'Content-Type': 'text/plain; charset=utf-8',
-              'Content-Length': Buffer.byteLength(content, 'utf-8'),
+          fetch(backendUrl, { headers })
+            .then(async (r) => {
+              const responseHeaders = {
+                'Content-Type': r.headers.get('content-type') || 'video/mp4',
+                'Accept-Ranges': 'bytes',
+                'Access-Control-Allow-Origin': '*',
+              };
+              if (r.headers.get('content-length')) responseHeaders['Content-Length'] = r.headers.get('content-length');
+              if (r.headers.get('content-range')) responseHeaders['Content-Range'] = r.headers.get('content-range');
+              res.writeHead(r.status, responseHeaders);
+              const reader = r.body.getReader();
+              const pump = () => reader.read().then(({ done, value }) => {
+                if (done) { res.end(); return; }
+                res.write(Buffer.from(value));
+                return pump();
+              });
+              return pump();
+            })
+            .catch((err) => {
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: err.message }));
             });
-            res.end(content);
-          } catch (err) {
-            res.writeHead(500, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ error: err.message }));
-          }
           return;
         }
 
-        // GET /api/stream?path=xxx — 流式播放本地视频文件（支持 Range 请求）
-        if (req.url.startsWith('/api/stream')) {
-          const url = new URL(req.url, 'http://localhost');
-          const filePath = url.searchParams.get('path');
+        // GET /api/anime/stream — 代理视频流到后端（X-Accel-Redirect）
+        if (req.url.startsWith('/api/anime/stream')) {
+          const backendUrl = `http://localhost:8080${req.url}`;
+          const headers = {};
+          if (req.headers.range) headers.range = req.headers.range;
 
-          if (!filePath) {
-            res.writeHead(400, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ error: '缺少 path 参数' }));
-            return;
-          }
+          fetch(backendUrl, { headers })
+            .then(async (r) => {
+              // 读取 X-Accel-Redirect 响应头获取文件路径
+              const nginxPath = r.headers.get('x-accel-redirect');
+              if (!nginxPath) {
+                res.writeHead(500, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ error: '后端未返回 X-Accel-Redirect' }));
+                return;
+              }
 
-          try {
-            const resolved = path.resolve(filePath);
-            if (!fs.existsSync(resolved)) {
-              res.writeHead(404, { 'Content-Type': 'application/json' });
-              res.end(JSON.stringify({ error: '文件不存在' }));
-              return;
-            }
+              // /video/E:/Media/xxx.mkv → E:/Media/xxx.mkv
+              const filePath = nginxPath.replace('/video/', '');
 
-            const stat = fs.statSync(resolved);
-            const fileSize = stat.size;
-            const ext = path.extname(resolved).toLowerCase();
-            console.log(`[STREAM] ${path.basename(resolved)} (${(fileSize / 1024 / 1024).toFixed(1)}MB)`);
+              if (!fs.existsSync(filePath)) {
+                res.writeHead(404, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ error: '文件不存在', path: filePath }));
+                return;
+              }
 
-            const mimeMap = {
-              '.mkv': 'video/x-matroska',
-              '.mp4': 'video/mp4',
-              '.avi': 'video/x-msvideo',
-              '.wmv': 'video/x-ms-wmv',
-              '.flv': 'video/x-flv',
-              '.mov': 'video/quicktime',
-              '.ts': 'video/mp2t',
-              '.m4v': 'video/mp4',
-              '.webm': 'video/webm',
-              '.rmvb': 'application/vnd.rn-realmedia-vbr',
-              '.srt': 'application/x-subrip',
-              '.vtt': 'text/vtt',
-              '.sub': 'text/plain',
-            };
-            const contentType = mimeMap[ext] || 'application/octet-stream';
+              const stat = fs.statSync(filePath);
+              const ext = path.extname(filePath).toLowerCase();
+              const mimeMap = {
+                '.mp4': 'video/mp4', '.m4v': 'video/mp4', '.webm': 'video/webm',
+                '.mkv': 'video/x-matroska', '.avi': 'video/x-msvideo',
+                '.ts': 'video/mp2t', '.flv': 'video/x-flv',
+              };
+              const contentType = mimeMap[ext] || 'video/mp4';
 
-            const range = req.headers.range;
-            if (range) {
-              const parts = range.replace(/bytes=/, '').split('-');
-              const start = parseInt(parts[0], 10);
-              const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
-              const chunkSize = end - start + 1;
+              console.log(`[STREAM] ${path.basename(filePath)} (${(stat.size / 1024 / 1024).toFixed(1)}MB)`);
 
-              res.writeHead(206, {
-                'Content-Range': `bytes ${start}-${end}/${fileSize}`,
-                'Accept-Ranges': 'bytes',
-                'Content-Length': chunkSize,
-                'Content-Type': contentType,
-              });
-              fs.createReadStream(resolved, { start, end }).pipe(res);
-            } else {
-              res.writeHead(200, {
-                'Content-Length': fileSize,
-                'Content-Type': contentType,
-                'Accept-Ranges': 'bytes',
-              });
-              fs.createReadStream(resolved).pipe(res);
-            }
-          } catch (err) {
-            res.writeHead(500, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ error: err.message }));
-          }
+              const range = req.headers.range;
+              if (range) {
+                const parts = range.replace(/bytes=/, '').split('-');
+                const start = parseInt(parts[0], 10);
+                const end = parts[1] ? parseInt(parts[1], 10) : stat.size - 1;
+                const chunkSize = end - start + 1;
+
+                res.writeHead(206, {
+                  'Content-Range': `bytes ${start}-${end}/${stat.size}`,
+                  'Accept-Ranges': 'bytes',
+                  'Content-Length': chunkSize,
+                  'Content-Type': contentType,
+                  'Access-Control-Allow-Origin': '*',
+                });
+                fs.createReadStream(filePath, { start, end }).pipe(res);
+              } else {
+                res.writeHead(200, {
+                  'Content-Length': stat.size,
+                  'Content-Type': contentType,
+                  'Accept-Ranges': 'bytes',
+                  'Access-Control-Allow-Origin': '*',
+                });
+                fs.createReadStream(filePath).pipe(res);
+              }
+            })
+            .catch((err) => {
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: err.message }));
+            });
           return;
         }
 
@@ -277,8 +253,8 @@ export default function localMediaPlugin() {
           return;
         }
 
-        // POST /api/anime/search — 查询单个影片信息（body: { name }）
-        if (req.url === '/api/anime/search' && req.method === 'POST') {
+        // POST /api/tmdb/search — 查询单个影片信息（body: { name }）
+        if (req.url === '/api/tmdb/search' && req.method === 'POST') {
           const body = await readBody(req);
           const { name } = JSON.parse(body);
           const config = readConfig();
@@ -371,8 +347,8 @@ export default function localMediaPlugin() {
           return;
         }
 
-        // POST /api/anime/research — 返回多个候选结果（body: { name }）
-        if (req.url === '/api/anime/research' && req.method === 'POST') {
+        // POST /api/tmdb/research — 返回多个候选结果（body: { name }）
+        if (req.url === '/api/tmdb/research' && req.method === 'POST') {
           const body = await readBody(req);
           const { name } = JSON.parse(body);
           const config = readConfig();
@@ -448,7 +424,7 @@ export default function localMediaPlugin() {
         }
 
         // GET /api/tmdb?query=xxx&apiKey=xxx
-        if (req.url.startsWith('/api/tmdb') && !req.url.startsWith('/api/tmdb/detail') && !req.url.startsWith('/api/tmdb/credits') && !req.url.startsWith('/api/tmdb/season')) {
+        if (req.url.startsWith('/api/tmdb') && !req.url.startsWith('/api/tmdb/detail') && !req.url.startsWith('/api/tmdb/season') && !req.url.startsWith('/api/tmdb/search') && !req.url.startsWith('/api/tmdb/research')) {
           const url = new URL(req.url, 'http://localhost');
           const query = url.searchParams.get('query');
           const apiKey = url.searchParams.get('apiKey');
@@ -501,75 +477,24 @@ export default function localMediaPlugin() {
           return;
         }
 
-        // GET /api/tmdb/detail?id=xxx&mediaType=tv&apiKey=xxx
-        if (req.url.startsWith('/api/tmdb/detail')) {
-          const url = new URL(req.url, 'http://localhost');
-          const id = url.searchParams.get('id');
-          const mediaType = url.searchParams.get('mediaType') || 'tv';
-          const apiKey = url.searchParams.get('apiKey');
-
-          if (!id || !apiKey) {
-            res.writeHead(400, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ error: '缺少 id 或 apiKey 参数' }));
-            return;
-          }
-
-          const tmdbUrl = `https://api.themoviedb.org/3/${mediaType}/${id}?api_key=${apiKey}&language=zh-CN`;
-          fetch(tmdbUrl).then((r) => r.json()).then((data) => {
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify(data));
-          }).catch((err) => {
-            res.writeHead(500, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ error: err.message }));
-          });
-          return;
-        }
-
-        // GET /api/tmdb/credits?id=xxx&mediaType=tv&apiKey=xxx
-        if (req.url.startsWith('/api/tmdb/credits')) {
-          const url = new URL(req.url, 'http://localhost');
-          const id = url.searchParams.get('id');
-          const mediaType = url.searchParams.get('mediaType') || 'tv';
-          const apiKey = url.searchParams.get('apiKey');
-
-          if (!id || !apiKey) {
-            res.writeHead(400, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ error: '缺少 id 或 apiKey 参数' }));
-            return;
-          }
-
-          const tmdbUrl = `https://api.themoviedb.org/3/${mediaType}/${id}/credits?api_key=${apiKey}&language=zh-CN`;
-          fetch(tmdbUrl).then((r) => r.json()).then((data) => {
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify(data));
-          }).catch((err) => {
-            res.writeHead(500, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ error: err.message }));
-          });
-          return;
-        }
-
-        // GET /api/tmdb/season?id=xxx&season=1&apiKey=xxx
-        if (req.url.startsWith('/api/tmdb/season')) {
-          const url = new URL(req.url, 'http://localhost');
-          const id = url.searchParams.get('id');
-          const season = url.searchParams.get('season') || '1';
-          const apiKey = url.searchParams.get('apiKey');
-
-          if (!id || !apiKey) {
-            res.writeHead(400, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ error: '缺少 id 或 apiKey 参数' }));
-            return;
-          }
-
-          const tmdbUrl = `https://api.themoviedb.org/3/tv/${id}/season/${season}?api_key=${apiKey}&language=zh-CN`;
-          fetch(tmdbUrl).then((r) => r.json()).then((data) => {
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify(data));
-          }).catch((err) => {
-            res.writeHead(500, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ error: err.message }));
-          });
+        // POST /api/tmdb/detail, /api/tmdb/season — 代理到后端
+        if ((req.url === '/api/tmdb/detail' || req.url === '/api/tmdb/season') && req.method === 'POST') {
+          const body = await readBody(req);
+          const backendUrl = `http://localhost:8080${req.url}`;
+          fetch(backendUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: body,
+          })
+            .then((r) => r.json())
+            .then((data) => {
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify(data));
+            })
+            .catch((err) => {
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: err.message }));
+            });
           return;
         }
 

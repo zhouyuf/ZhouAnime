@@ -89,9 +89,8 @@ ZhouAnime/
 | GET | `/api/tmdb/config` | 读取配置（路径 + API Key） |
 | PUT | `/api/tmdb/config` | 写入配置 |
 | GET | `/api/anime/folders` | 列出本地路径的子目录名列表 |
-| POST | `/api/anime/search` | 查询单个影片信息（body: `{ name }`） |
-| POST | `/api/anime/research` | 返回多个候选匹配结果（body: `{ name }`） |
-| GET | `/api/tmdb/search?query=xxx&apiKey=xxx` | 代理 TMDB 搜索 API（中文搜索） |
+| POST | `/api/tmdb/search` | 查询单个影片信息（body: `{ name }`） |
+| POST | `/api/tmdb/research` | 返回多个候选匹配结果（body: `{ name }`） |
 
 > 影片缓存已改为 localStorage 存储，无需后端接口。
 

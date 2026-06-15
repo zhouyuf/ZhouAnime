@@ -4,13 +4,11 @@ import { Layout, Spin, Tag, Empty, Typography, Button } from 'antd';
 import { ArrowLeftOutlined, UserOutlined } from '@ant-design/icons';
 import videojs from 'video.js';
 import 'video.js/dist/video-js.css';
-import JASSUB from 'jassub';
 import Header from '../components/Header';
 import Footer from '../components/Footer';
 import SettingsModal from '../components/SettingsModal';
-import { get } from '../utils/request';
-import { getCachedAnimeItem } from '../utils/localCache';
-import { API_BASE } from '../config';
+import { get, post } from '../utils/request';
+import { getCachedAnimeItem, getCachedDetail, setCachedDetail, getCachedVideos, setCachedVideos, getCachedSeason, setCachedSeason } from '../utils/localCache';
 import './Player.css';
 
 const { Content } = Layout;
@@ -22,7 +20,6 @@ function Player() {
   const wrapperRef = useRef(null);
   const videoElRef = useRef(null);
   const vjsRef = useRef(null);
-  const jassubRef = useRef(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   const [mediaItem, setMediaItem] = useState(null);
@@ -52,32 +49,56 @@ function Player() {
     init();
   }, [folderName]);
 
-  // 加载详情和演职人员
+  // 加载详情（含演职人员）
   useEffect(() => {
     if (!mediaItem || !tmdbKey) return;
-    const { id, mediaType } = mediaItem;
+    const { id, mediaType, folderName } = mediaItem;
     const type = mediaType || 'tv';
 
-    Promise.all([
-      get(`/api/tmdb/detail?id=${id}&mediaType=${type}&apiKey=${tmdbKey}`),
-      get(`/api/tmdb/credits?id=${id}&mediaType=${type}&apiKey=${tmdbKey}`),
-    ]).then(([detailData, creditsData]) => {
-      setDetail(detailData);
-      setCredits(creditsData);
-      if (type === 'tv' && detailData.seasons) {
-        const validSeasons = detailData.seasons.filter((s) => s.season_number > 0);
+    // 优先从缓存读取
+    const cached = getCachedDetail(folderName);
+    if (cached) {
+      setDetail(cached);
+      setCredits(cached.credits || null);
+      if (type === 'tv' && cached.seasons) {
+        const validSeasons = cached.seasons.filter((s) => s.season_number > 0);
         setSeasons(validSeasons);
         if (validSeasons.length > 0) setActiveSeason(validSeasons[0].season_number);
       }
-    }).finally(() => setLoading(false));
+      setLoading(false);
+      return;
+    }
+
+    post(`/api/tmdb/detail`, { id, mediaType: type })
+      .then((detailData) => {
+        setDetail(detailData);
+        setCredits(detailData.credits || null);
+        setCachedDetail(folderName, detailData);
+        if (type === 'tv' && detailData.seasons) {
+          const validSeasons = detailData.seasons.filter((s) => s.season_number > 0);
+          setSeasons(validSeasons);
+          if (validSeasons.length > 0) setActiveSeason(validSeasons[0].season_number);
+        }
+      })
+      .finally(() => setLoading(false));
   }, [mediaItem, tmdbKey]);
 
   // 加载本地视频文件列表
   useEffect(() => {
-    if (!mediaItem?.folderPath) return;
-    get(`/api/videos?path=${encodeURIComponent(mediaItem.folderPath)}`)
+    if (!mediaItem?.folderName) return;
+
+    // 优先从缓存读取
+    const cached = getCachedVideos(mediaItem.folderName);
+    if (cached) {
+      setVideoFiles(cached);
+      if (mediaItem.mediaType !== 'tv' && cached.length > 0) setCurrentVideo(cached[0]);
+      return;
+    }
+
+    post(`/api/anime/videos`, { name: mediaItem.folderName })
       .then((files) => {
         setVideoFiles(files || []);
+        setCachedVideos(mediaItem.folderName, files || []);
         if (mediaItem.mediaType !== 'tv' && files.length > 0) setCurrentVideo(files[0]);
       })
       .catch(() => setVideoFiles([]));
@@ -86,9 +107,23 @@ function Player() {
   // 加载 TMDB 集数信息（仅电视剧）
   useEffect(() => {
     if (!mediaItem || !tmdbKey || mediaItem.mediaType !== 'tv' || !detail) return;
-    get(`/api/tmdb/season?id=${mediaItem.id}&season=${activeSeason}&apiKey=${tmdbKey}`)
+
+    // 优先从缓存读取
+    const cached = getCachedSeason(mediaItem.folderName, activeSeason);
+    if (cached) {
+      setEpisodes(cached.episodes || []);
+      setActiveEpisode(null);
+      if (videoFiles.length > 0) {
+        setCurrentVideo(videoFiles[0]);
+        setActiveEpisode(cached.episodes?.[0] || null);
+      }
+      return;
+    }
+
+    post(`/api/tmdb/season`, { id: mediaItem.id, season: activeSeason })
       .then((data) => {
         setEpisodes(data.episodes || []);
+        setCachedSeason(mediaItem.folderName, activeSeason, data);
         setActiveEpisode(null);
         if (videoFiles.length > 0) {
           setCurrentVideo(videoFiles[0]);
@@ -98,9 +133,9 @@ function Player() {
       .catch(() => setEpisodes([]));
   }, [mediaItem, tmdbKey, activeSeason, detail]);
 
-  // 初始化 Video.js 播放器 + 切换视频源 + 加载字幕
+  // 初始化 Video.js 播放器 + 切换视频源
   useEffect(() => {
-    if (!currentVideo) return;
+    if (!currentVideo || !mediaItem?.folderName) return;
 
     // video 元素在 currentVideo 变化后才渲染，等待一帧
     const timer = setTimeout(() => {
@@ -130,8 +165,9 @@ function Player() {
 
       // 切换视频源
       const player = vjsRef.current;
-      const src = `/api/stream?path=${encodeURIComponent(currentVideo.path)}`;
-      const ext = currentVideo.ext?.toLowerCase();
+      const params = new URLSearchParams({ folder: mediaItem.folderName, file: currentVideo });
+      const src = `/api/anime/stream/test?${params.toString()}`;
+      const ext = currentVideo.match(/\.[^.]+$/)?.[0]?.toLowerCase();
       const typeMap = {
         '.mp4': 'video/mp4', '.m4v': 'video/mp4', '.webm': 'video/webm',
         '.mkv': 'video/x-matroska', '.avi': 'video/x-msvideo',
@@ -139,39 +175,14 @@ function Player() {
       };
       player.src({ src, type: typeMap[ext] || 'video/mp4' });
       player.ready(() => player.play().catch(() => {}));
-
-      // 渲染 JASSUB 字幕
-      if (jassubRef.current) { jassubRef.current.destroy(); jassubRef.current = null; }
-      const assSubs = currentVideo.subtitles?.filter((s) => s.ext === '.ass' || s.ext === '.ssa') || [];
-      if (assSubs.length > 0) {
-        let canvas = wrapperRef.current.querySelector('.jassub-canvas');
-        if (!canvas) {
-          canvas = document.createElement('canvas');
-          canvas.className = 'jassub-canvas';
-          wrapperRef.current.appendChild(canvas);
-        }
-        try {
-          jassubRef.current = new JASSUB({
-            video: videoEl,
-            canvas: canvas,
-            subUrl: `/api/subtitle/raw?path=${encodeURIComponent(assSubs[0].path)}`,
-            workerUrl: '/jassub/jassub-worker.js',
-            wasmUrl: '/jassub/jassub-worker.wasm',
-            modernWasmUrl: '/jassub/jassub-worker-modern.wasm',
-            fonts: [],
-            availableFonts: {},
-          });
-        } catch (e) { console.error('JASSUB init failed:', e); }
-      }
     }, 0);
 
     return () => clearTimeout(timer);
-  }, [currentVideo]);
+  }, [currentVideo, mediaItem]);
 
   // 组件卸载时销毁播放器
   useEffect(() => {
     return () => {
-      if (jassubRef.current) { jassubRef.current.destroy(); jassubRef.current = null; }
       if (vjsRef.current) { vjsRef.current.dispose(); vjsRef.current = null; }
     };
   }, []);
@@ -234,7 +245,7 @@ function Player() {
             <div className="player-episode-tag">
               {isTV && activeEpisode
                 ? `S${activeSeason} E${activeEpisode.episode_number} · ${activeEpisode.name || ''}`
-                : currentVideo.name}
+                : currentVideo}
             </div>
           )}
           {currentVideo ? (
@@ -242,7 +253,15 @@ function Player() {
               <video ref={videoElRef} className="video-js vjs-big-play-centered" />
             </div>
           ) : (
-            <div className="player-placeholder">
+            <div
+              className="player-placeholder"
+              style={{
+                backgroundImage: mediaItem?.backdrop ? `url(${mediaItem.backdrop})` : 'none',
+                backgroundSize: 'cover',
+                backgroundPosition: 'center',
+              }}
+            >
+              <div className="player-placeholder-overlay" />
               <span className="player-placeholder-text">
                 {videoFiles.length === 0 ? '未找到本地视频文件' : '请选择集数开始播放'}
               </span>

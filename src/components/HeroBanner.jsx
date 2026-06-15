@@ -1,8 +1,11 @@
+import { useNavigate } from 'react-router-dom';
 import { Carousel, Button, Rate, Tag } from 'antd';
 import { PlayCircleOutlined, StarFilled } from '@ant-design/icons';
 import './HeroBanner.css';
 
 function HeroBanner({ slides }) {
+  const navigate = useNavigate();
+
   return (
     <section className="hero-banner">
       <Carousel autoplay autoplaySpeed={5000} effect="fade">
@@ -25,7 +28,12 @@ function HeroBanner({ slides }) {
                   </span>
                 </div>
                 <p className="hero-desc">{slide.description}</p>
-                <Button type="primary" size="large" icon={<PlayCircleOutlined />}>
+                <Button
+                  type="primary"
+                  size="large"
+                  icon={<PlayCircleOutlined />}
+                  onClick={() => navigate(`/play/${slide.folderName}`)}
+                >
                   立即播放
                 </Button>
               </div>

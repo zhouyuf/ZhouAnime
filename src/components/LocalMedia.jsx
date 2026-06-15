@@ -94,7 +94,7 @@ function LocalMedia({ onOpenSettings, configSaved, embedded = false }) {
   const handleReimport = async (folderName) => {
     setRematchModal({ open: true, folderName, results: [], loading: true, selected: null });
     try {
-      const data = await post(`/api/anime/research`, { name: folderName });
+      const data = await post(`/api/tmdb/research`, { name: folderName });
       setRematchModal((prev) => ({ ...prev, results: Array.isArray(data) ? data : [], loading: false }));
     } catch {
       message.error('搜索失败');
@@ -226,7 +226,7 @@ function LocalMedia({ onOpenSettings, configSaved, embedded = false }) {
         setProgress((prev) => ({ ...prev, current: i, currentName: name }));
 
         try {
-          const data = await post(`/api/anime/search`, { name });
+          const data = await post(`/api/tmdb/search`, { name });
 
           const result = {
             id: data.tmdbId || name,
